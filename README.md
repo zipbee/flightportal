@@ -1,3 +1,11 @@
+# Changes from original:
+
+* Compatible with CircuitPython 9.x
+* Added display of clock with date/time when idle (no flights)
+* Added lingering display of flight data for configurable period
+* Repeat scrolling of detailst whilst flight is displayed
+* Many other changes for syntax and error handling
+
 # flightportal
 Project for displaying the details of planes overhead on an Adafruit MatrixPortal and LED matrix
 
