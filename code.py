@@ -36,6 +36,8 @@ TEXT_SPEED  = 0.03 # speed text labels will move - pause time per pixel shift in
 CLOCK_BLINK = False    # Blink the cursor between minute/hour/seconds or not
 TIME_COLOUR = 0xEE82EE # Grey
 DATE_COLOUR = 0xEE82EE # Grey
+CLOCK_FULL_DATE  = False # True = 15/12/2024, False = Sun 15 Dec
+CLOCK_TIME_FIRST = False # True = Time on first row, False = Date on first row
 
 # Set up watchdog which will reset the device if not fed (see watchdog.feed() calls)
 # Should auto recover from freezing up
@@ -134,7 +136,6 @@ flight_labels_text = ["","",""]
 flight_label_group = displayio.Group()
 for label in flight_labels:
     flight_label_group.append(label)
-matrixportal.display.root_group = flight_label_group
 
 
 # 
@@ -151,8 +152,8 @@ clock_color[2] = DATE_COLOUR
 clock_tile_grid = displayio.TileGrid(clock_bitmap, pixel_shader=clock_color)
 clock_group.append(clock_tile_grid)  # Add the TileGrid to the Group
 clock_time_label = Label(terminalio.FONT)
-clock_group.append(clock_time_label)
 clock_date_label = Label(terminalio.FONT)
+clock_group.append(clock_time_label)
 clock_group.append(clock_date_label)
 
 
@@ -176,7 +177,10 @@ def scroll(line):
         watchdog.feed()
         time.sleep(TEXT_SPEED)
 
-# Populate the labels, then scroll longer versions of the text
+
+# 
+# Function to update the text labels and scroll them in turn
+# 
 def display_flight():
     # Immediately show all labels as is
     matrixportal.display.root_group = flight_label_group
@@ -340,25 +344,46 @@ def update_clock(*, hours=None, minutes=None, show_colon=False):
     else:
         colon = ":"
 
+    if CLOCK_TIME_FIRST:
+        first_label = clock_time_label
+        second_label = clock_date_label
+    else:
+        first_label = clock_date_label
+        second_label = clock_time_label
+   
     # Update the text for the time
     clock_time_label.text = "{hours:02d}{colon}{minutes:02d}{colon}{seconds:02d}".format(
         hours=now[3], minutes=now[4], seconds=now[5], colon=colon
     )
-    # Center the label by getting the box width and removing it from the width of the display
-    time_box_x, time_box_y, time_box_width, time_box_height = clock_time_label.bounding_box
-    clock_time_label.x = round(matrixportal.display.width / 2 - time_box_width / 2)
-    # Put it 1/4ths down the height of the display
-    clock_time_label.y = (matrixportal.display.height // 4) * 1
     
     # Update the text for the date
-    clock_date_label.text = "{day:02d}/{month:02d}/{year}".format(
-        day=now[2],month=now[1],year=now[0]
-    )
+    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" ]
+    months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]    
+    if CLOCK_FULL_DATE:
+        clock_date_label.text = "{day:02d}/{month:02d}/{year}".format(
+            day = now[2],
+            month = now[1],
+            year = now[0]
+        )
+    else:
+        clock_date_label.text = "{dayname} {day} {monthname}".format(
+            dayname = days[now[6]],
+            day = now[2],
+            monthname = months[now[1]]
+        )
+
+    # Update label positions
     # Center the label by getting the box width and removing it from the width of the display
-    date_box_x, date_box_y, date_box_width, date_box_h = clock_date_label.bounding_box
-    clock_date_label.x = round(matrixportal.display.width / 2 - date_box_width / 2)
+    time_box_x, time_box_y, time_box_width, time_box_height = first_label.bounding_box
+    first_label.x = round(matrixportal.display.width / 2 - time_box_width / 2)
+    # Put it 1/4ths down the height of the display
+    first_label.y = (matrixportal.display.height // 4) * 1
+     
+    # Center the label by getting the box width and removing it from the width of the display
+    date_box_x, date_box_y, date_box_width, date_box_h = second_label.bounding_box
+    second_label.x = round(matrixportal.display.width / 2 - date_box_width / 2)
     # Put it 3/4ths down the height of the display
-    clock_date_label.y = (matrixportal.display.height // 4) * 3
+    second_label.y = (matrixportal.display.height // 4) * 3
     
     # Set as the main display
     matrixportal.display.root_group = clock_group
@@ -366,11 +391,11 @@ def update_clock(*, hours=None, minutes=None, show_colon=False):
 # 
 # Set some defaults to start and run the main loop
 # 
-flight_id = False        # No flight detected at start up
-last_flight = ''         # Used to keep a record of the last flight detected
-last_flight_detected = 0 # Timestamp of when the last flight was detected
-last_flight_check = 0    # Timestamp of when we last checked for overhead flights
-last_time_sync = None    # Timestamp of when we last synced the clock with the internet
+flight_id = False           # No flight detected at start up
+last_flight = ''            # Used to keep a record of the last flight detected
+last_flight_detected = None # Timestamp of when the last flight was detected
+last_flight_check = None    # Timestamp of when we last checked for overhead flights
+last_time_sync = None       # Timestamp of when we last synced the clock with the internet
 while True:
     watchdog.feed()
     
@@ -380,8 +405,16 @@ while True:
         network.get_local_time()
         last_time_sync = time.monotonic()
 
+    # Clear the display X seconds after the last flight was found and show the clock
+    if last_flight_detected == None or time.monotonic() - last_flight_detected > NO_FLIGHT_DISPLAY_CLEAR_DELAY:
+        clear_flight()
+        update_clock()
+    # If time isn't up yet and we did find a flight before, keep showing it
+    elif flight_id:
+        display_flight()
+
     # Get current flights if enough time has passed since the last check
-    if time.monotonic() > (last_flight_check + QUERY_DELAY):
+    if last_flight_check == None or time.monotonic() > (last_flight_check + QUERY_DELAY):
         print("Checking for flights")
         flight_id = get_flights()
         last_flight_check = time.monotonic()
@@ -412,14 +445,6 @@ while True:
                 last_flight = flight_id
                 last_flight_detected = time.monotonic()
                 
-    # Clear the display X seconds after the last flight was found and show the clock
-    if time.monotonic() - last_flight_detected > NO_FLIGHT_DISPLAY_CLEAR_DELAY:
-        clear_flight()
-        update_clock()
-    # If time isn't up yet and we did find a flight before, keep showing it
-    elif flight_id:
-        display_flight()
-
     # Sleep for 1 second before doing the loop again, feed the watchdog and collect the rubbish
     time.sleep(1)
     watchdog.feed()
