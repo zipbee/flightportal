@@ -341,7 +341,7 @@ def update_clock(*, hours=None, minutes=None, show_colon=False):
         colon = ":"
 
     # Update the text for the time
-    clock_time_label.text = "{hours}{colon}{minutes:02d}{colon}{seconds:02d}".format(
+    clock_time_label.text = "{hours:02d}{colon}{minutes:02d}{colon}{seconds:02d}".format(
         hours=now[3], minutes=now[4], seconds=now[5], colon=colon
     )
     # Center the label by getting the box width and removing it from the width of the display
@@ -366,15 +366,16 @@ def update_clock(*, hours=None, minutes=None, show_colon=False):
 # 
 # Set some defaults to start and run the main loop
 # 
+flight_id = False        # No flight detected at start up
 last_flight = ''         # Used to keep a record of the last flight detected
 last_flight_detected = 0 # Timestamp of when the last flight was detected
 last_flight_check = 0    # Timestamp of when we last checked for overhead flights
-last_time_sync = 0       # Timestamp of when we last synced the clock with the internet
+last_time_sync = None    # Timestamp of when we last synced the clock with the internet
 while True:
     watchdog.feed()
     
     # Sync the time with the internet every hour
-    if time.monotonic() > last_time_sync + 3600:
+    if last_time_sync == None or time.monotonic() > last_time_sync + 3600:
         print("Synchronising time")
         network.get_local_time()
         last_time_sync = time.monotonic()
