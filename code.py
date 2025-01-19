@@ -17,6 +17,7 @@ from adafruit_display_text.label import Label
 from microcontroller import watchdog
 from watchdog import WatchDogMode
 from secrets import secrets
+from adafruit_datetime import datetime as adafruit_datetime
 
 print('Starting up');
 
@@ -24,14 +25,12 @@ print('Starting up');
 # Settings
 #
 # Flight display settings
-ROW_ONE_COLOUR      = 0xEE82EE # Grey
-ROW_TWO_COLOUR      = 0x004B00 # Green
-ROW_THREE_COLOUR    = 0xFFA500 # Yellow
+ROW_COLOURS         = [0xEE82EE,0x004B00,0xFFA500,0x3040FF,0xFF007F] # Grey,Green,Yellow,Blue,Pink
 PLANE_COLOUR        = 0x4B0082 # Purple
 PAUSE_BETWEEN_LABEL_SCROLLING   = 1 # Time in seconds to wait between scrolling one label and the next
 NO_FLIGHT_DISPLAY_CLEAR_DELAY   = 60 # Time after the last flight was found before switching back to clock
-PLANE_SPEED = 0.03 # speed plane animation will move - pause time per pixel shift in seconds
-TEXT_SPEED  = 0.03 # speed text labels will move - pause time per pixel shift in seconds
+PLANE_SPEED = 0.02 # speed plane animation will move - pause time per pixel shift in seconds
+TEXT_SPEED  = 0.02 # speed text labels will move - pause time per pixel shift in seconds
 # Clock settings
 CLOCK_BLINK = False    # Blink the cursor between minute/hour/seconds or not
 TIME_COLOUR = 0xEE82EE # Grey
@@ -110,27 +109,27 @@ plane_animation_group.append(plane_tilegrid)
 flight_labels = [
     Label(
         terminalio.FONT,
-        color=ROW_ONE_COLOUR,
+        color=ROW_COLOURS[0],
         text=""
     ),
     Label(
         terminalio.FONT,
-        color=ROW_TWO_COLOUR,
+        color=ROW_COLOURS[1],
         text=""
     ),
     Label(
         terminalio.FONT,
-        color=ROW_THREE_COLOUR,
+        color=ROW_COLOURS[2],
         text=""
     )
 ]
 flight_labels[0].x = 1
-flight_labels[0].y = 4
+flight_labels[0].y = 5
 flight_labels[1].x = 1
-flight_labels[1].y = 15
+flight_labels[1].y = 16
 flight_labels[2].x = 1
-flight_labels[2].y = 25
-flight_labels_text = ["","",""]
+flight_labels[2].y = 27
+flight_labels_text = ["","","","",""]
 
 # Add the labels to the display
 flight_label_group = displayio.Group()
@@ -190,20 +189,34 @@ def display_flight():
     time.sleep(PAUSE_BETWEEN_LABEL_SCROLLING)
 
     # Now scroll each label in turn
-    for index,label in enumerate(flight_labels):
-        label.x=matrixportal.display.width+1
-        scroll(label)
-        label.x=1
-        time.sleep(PAUSE_BETWEEN_LABEL_SCROLLING)
+    for text_index,label in enumerate(flight_labels_text):
+        # If we have more text lines than labels
+        if text_index >= len(flight_labels):
+            # Shift all text by 1 to get the next line on screen
+            diff = (text_index + 1) - len(flight_labels)
+            for display_index,label in enumerate(flight_labels):
+                label.text = flight_labels_text[diff+display_index]
+                label.color = ROW_COLOURS[diff+display_index]
 
+            # Scroll the bottom line because it's new
+            flight_labels[2].x=matrixportal.display.width+1
+            scroll(flight_labels[2])
+            flight_labels[2].x=1
+        # We're within the text that fits on the display, just scroll
+        else:
+            flight_labels[text_index].x=matrixportal.display.width+1
+            flight_labels[text_index].color = ROW_COLOURS[text_index]
+            scroll(flight_labels[text_index])
+            flight_labels[text_index].x=1
+        time.sleep(PAUSE_BETWEEN_LABEL_SCROLLING)
 
 #
 # Function to blank the flight detail text
 #
 def clear_flight():
-    for label in flight_labels:
+    for index, label in enumerate(flight_labels):
         label.text = ""
-
+        label.color = ROW_COLOURS[index]
 
 #
 # Take the flight number we found with a search, and load details about it
@@ -285,10 +298,10 @@ def parse_details_json():
         airport_origin_code      = 'Unknown'
         airport_destination_name = 'Unknown'
         airport_destination_code = 'Unknown'
-        altitude                 = 'Unknown'
-        speed                    = 'Unknown'
-        time_estimated_arrival   = 'Unknown'
-        time_real_departure      = 'Unknown'
+        altitude                 = 0
+        speed                    = 0
+        estimated_arrival_time   = 0
+        real_departure_time      = 0
 
         try:
             # Extract fields from the JSON, handle any non-existent keys and set 'Unknown' as default
@@ -301,26 +314,54 @@ def parse_details_json():
             airport_origin_code      = long_json.get('airport', {}).get('origin', {}).get('code', {}).get('iata') or 'Unknown'
             airport_destination_name = long_json.get('airport', {}).get('destination', {}).get('name') or 'Unknown'
             airport_destination_code = long_json.get('airport', {}).get('destination', {}).get('code', {}).get('iata') or 'Unknown'
-            real_departure_time      = long_json.get('time', {}).get('real', {}).get('departure') or 'Unknown'
-            estimated_arrival_time   = long_json.get('time', {}).get('estimated', {}).get('arrival') or 'Unknown'
+            real_departure_time      = long_json.get('time', {}).get('real', {}).get('departure') or 0
+            estimated_arrival_time   = long_json.get('time', {}).get('estimated', {}).get('arrival') or 0
             trail_data               = long_json.get('trail', [])
             if len(trail_data) > 0:
-                speed    = trail_data[0].get('spd') or 'Unknown'
-                altitude = trail_data[0].get('alt') or 'Unknown'
+                speed    = trail_data[0].get('spd') or 0
+                altitude = trail_data[0].get('alt') or 0
         except AttributeError as e:
             print(e)
             pass
 
-        # Remove airport from airport names
+        # Remove airport and international from airport names
         airport_origin_name = airport_origin_name.replace(" Airport","")
+        airport_origin_name = airport_origin_name.replace(" International","")
         airport_destination_name=airport_destination_name.replace(" Airport","")
+        airport_destination_name=airport_destination_name.replace(" International","")
 
+        # Convert arrival/departure timestamps to readable text
+        if estimated_arrival_time != 0:
+            arrival_time = adafruit_datetime.timetuple(adafruit_datetime.fromtimestamp(estimated_arrival_time))
+            arrival_time_text = "{hours:02d}:{minutes:02d}".format(
+                hours=arrival_time[3], minutes=arrival_time[4]
+            )
+        else:
+            arrival_time_text = 'Unknown'
+        if real_departure_time != 0:
+            departure_time = adafruit_datetime.timetuple(adafruit_datetime.fromtimestamp(real_departure_time))
+            departure_time_text = "{hours:02d}:{minutes:02d}".format(
+                hours=departure_time[3], minutes=departure_time[4]
+            )
+        else:
+            departure_time_text = 'Unknown'
+
+        if speed != 0:
+            speed_text = "{speed}kn".format(speed=speed)
+        else:
+            speed_text = "Unknown"
+        if altitude != 0:
+            altitude_text = "{altitude}ft".format(altitude=altitude)
+        else:
+            altitude_text = "Unknown"
         # Use global so we can change these values inside this function, the values are read again in display_flight()
         global flight_labels_text
-        flight_labels_text = ["","",""]
+        flight_labels_text = ["","","","",""]
         flight_labels_text[0] = flight_number + "-" + flight_callsign + " - " + airline_name
-        flight_labels_text[1] = airport_origin_code + "-" + airport_destination_code + " - " + airport_origin_name + "-" + airport_destination_name
-        flight_labels_text[2] = aircraft_model + " - " + str(speed) + " knots - " + str(altitude) + " feet"
+        flight_labels_text[1] = aircraft_code + " - " + aircraft_model
+        flight_labels_text[2] = airport_origin_code + "-" + airport_destination_code + " - " + airport_origin_name + "-" + airport_destination_name
+        flight_labels_text[3] = "Speed " + speed_text + " - Altitude " + altitude_text
+        flight_labels_text[4] = "Departure " + departure_time_text + " (UTC) - ETA " + arrival_time_text + " (UTC)"
 
         # optional filter example - check things and return false if you want
 
@@ -437,6 +478,7 @@ while True:
         update_clock()
     # If time isn't up yet and we did find a flight before, keep showing it
     elif flight_id:
+        clear_flight()
         display_flight()
 
     # Get current flights if enough time has passed since the last check
