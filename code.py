@@ -20,9 +20,9 @@ from secrets import secrets
 
 print('Starting up');
 
-# 
+#
 # Settings
-# 
+#
 # Flight display settings
 ROW_ONE_COLOUR      = 0xEE82EE # Grey
 ROW_TWO_COLOUR      = 0x004B00 # Green
@@ -47,9 +47,9 @@ CLOCK_TIME_FIRST = False # True = Time on first row, False = Date on first row
 QUERY_DELAY = 30 # How often to query fr24, in seconds
 BOUNDS_BOX  = secrets["bounds_box"] # Area to search for flights, see secrets file
 
-# 
+#
 # Set up URL prefixes for using fr24 data
-# 
+#
 FLIGHT_SEARCH_HEAD="https://data-cloud.flightradar24.com/zones/fcgi/feed.js?bounds="
 FLIGHT_SEARCH_TAIL="&faa=1&satellite=1&mlat=1&flarm=1&adsb=1&gnd=0&air=1&vehicles=0&estimated=0&maxage=14400&gliders=0&stats=0&ems=1&limit=1"
 FLIGHT_SEARCH_URL=FLIGHT_SEARCH_HEAD+BOUNDS_BOX+FLIGHT_SEARCH_TAIL
@@ -61,13 +61,13 @@ rheaders = {
      "accept": "application/json"
 }
 # Limit how much memory can be used by json parsing
-json_size=14336
+json_size=143360
 json_bytes=bytearray(json_size)
 
 
-# 
+#
 # Set up core components
-# 
+#
 matrixportal = MatrixPortal(status_neopixel=None, debug=False)
 network = Network(status_neopixel=board.NEOPIXEL, debug=False)
 # Set up the HTTP request library
@@ -78,11 +78,11 @@ requests = adafruit_requests.Session(pool, ssl_context)
 
 #
 # Set up plane pixel drawing - flies across screen when flight is found
-# 
+#
 plane_bitmap = displayio.Bitmap(12, 12, 2)
 # Squint and it looks like a plane
 plane_data = bytes([
-    0,0,0,0,0,0,0,0,0,0,0,0,    
+    0,0,0,0,0,0,0,0,0,0,0,0,
     0,0,0,0,0,1,0,0,0,0,0,0,
     0,0,0,0,1,1,0,0,0,0,0,0,
     0,0,0,1,1,1,0,0,0,0,0,0,
@@ -104,9 +104,9 @@ plane_animation_group = displayio.Group(x = matrixportal.display.width + 12, y =
 plane_animation_group.append(plane_tilegrid)
 
 
-# 
-# Set up flight detail display 
-# 
+#
+# Set up flight detail display
+#
 flight_labels = [
     Label(
         terminalio.FONT,
@@ -138,9 +138,9 @@ for label in flight_labels:
     flight_label_group.append(label)
 
 
-# 
+#
 # Set up Clock display
-# 
+#
 clock_group = displayio.Group()  # Create a Group
 clock_bitmap = displayio.Bitmap(64, 32, 2)  # Create a bitmap object,width, height, bit depth
 clock_color = displayio.Palette(3)  # Create a color palette
@@ -153,13 +153,17 @@ clock_tile_grid = displayio.TileGrid(clock_bitmap, pixel_shader=clock_color)
 clock_group.append(clock_tile_grid)  # Add the TileGrid to the Group
 clock_time_label = Label(terminalio.FONT)
 clock_date_label = Label(terminalio.FONT)
-clock_group.append(clock_time_label)
-clock_group.append(clock_date_label)
+if CLOCK_TIME_FIRST:
+    clock_group.append(clock_time_label)
+    clock_group.append(clock_date_label)
+else:
+    clock_group.append(clock_date_label)
+    clock_group.append(clock_time_label)
 
 
-# 
+#
 # Function to scroll the plane animation across the screen
-# 
+#
 def plane_animation():
     matrixportal.display.root_group = plane_animation_group
     for i in range(matrixportal.display.width+24,-12,-1):
@@ -167,9 +171,9 @@ def plane_animation():
             watchdog.feed()
             time.sleep(PLANE_SPEED)
 
-# 
+#
 # Function to scroll a label, start at the right edge of the screen and go left one pixel at a time
-# 
+#
 def scroll(line):
     line.x=matrixportal.display.width
     for i in range(matrixportal.display.width+1,0-line.bounding_box[2],-1):
@@ -177,10 +181,7 @@ def scroll(line):
         watchdog.feed()
         time.sleep(TEXT_SPEED)
 
-
-# 
-# Function to update the text labels and scroll them in turn
-# 
+# Populate the labels, then scroll longer versions of the text
 def display_flight():
     # Immediately show all labels as is
     matrixportal.display.root_group = flight_label_group
@@ -196,9 +197,9 @@ def display_flight():
         time.sleep(PAUSE_BETWEEN_LABEL_SCROLLING)
 
 
-# 
+#
 # Function to blank the flight detail text
-# 
+#
 def clear_flight():
     for label in flight_labels:
         label.text = ""
@@ -206,7 +207,7 @@ def clear_flight():
 
 #
 # Take the flight number we found with a search, and load details about it
-# 
+#
 def get_flight_details(flight_number):
     # the JSON from FR24 is too big for the matrixportal memory to handle. So we load it in chunks into our static array,
     # as far as the big "trails" section of waypoints at the end of it, then ignore most of that part. Should be about 9KB, we have 14K before we run out of room..
@@ -253,7 +254,7 @@ def get_flight_details(flight_number):
                     # Stop reading chunks
                     print("Details lookup saved " + str(trail_end) + " bytes.")
                     return True
-                    
+
     # Handle occasional URL fetching errors
     except (RuntimeError, OSError, HttpError) as e:
             print("Error--------------------------------------------------")
@@ -267,24 +268,49 @@ def get_flight_details(flight_number):
 
 #
 # Function to extract the relevant fields from the json data
-# 
+#
 def parse_details_json():
     global json_bytes
     try:
         # get the JSON from the bytes
         long_json=json.loads(json_bytes)
 
-        # Extract fields from the JSON, handle any non-existent keys and set 'Unknown' as default
-        flight_number               = long_json.get('identification', {}).get('number', {}).get('default', 'Unknown')
-        flight_callsign             = long_json.get('identification', {}).get('callsign', 'Unknown')
-        aircraft_code               = long_json.get('aircraft', {}).get('model', {}).get('code', 'Unknown')
-        aircraft_model              = long_json.get('aircraft', {}).get('model', {}).get('text', 'Unknown')
-        airline_name                = long_json.get('airline', {}).get('name', 'Unknown')
-        airport_origin_name         = long_json.get('airport', {}).get('origin', {}).get('name', 'Unknown')
-        airport_origin_code         = long_json.get('airport', {}).get('origin', {}).get('code', {}).get('iata', 'Unknown')
-        airport_destination_name    = long_json.get('airport', {}).get('destination', {}).get('name', 'Unknown')
-        airport_destination_code    = long_json.get('airport', {}).get('destination', {}).get('code', {}).get('iata', 'Unknown')
-        
+        # Set some defaults
+        flight_number            = 'Unknown'
+        flight_callsign          = 'Unknown'
+        aircraft_code            = 'Unknown'
+        aircraft_model           = 'Unknown'
+        airline_name             = 'Unknown'
+        airport_origin_name      = 'Unknown'
+        airport_origin_code      = 'Unknown'
+        airport_destination_name = 'Unknown'
+        airport_destination_code = 'Unknown'
+        altitude                 = 'Unknown'
+        speed                    = 'Unknown'
+        time_estimated_arrival   = 'Unknown'
+        time_real_departure      = 'Unknown'
+
+        try:
+            # Extract fields from the JSON, handle any non-existent keys and set 'Unknown' as default
+            flight_number            = long_json.get('identification', {}).get('number', {}).get('default') or 'Unknown'
+            flight_callsign          = long_json.get('identification', {}).get('callsign')  or 'Unknown'
+            aircraft_code            = long_json.get('aircraft', {}).get('model', {}).get('code') or 'Unknown'
+            aircraft_model           = long_json.get('aircraft', {}).get('model', {}).get('text') or 'Unknown'
+            airline_name             = long_json.get('airline', {}).get('name') or 'Unknown'
+            airport_origin_name      = long_json.get('airport', {}).get('origin', {}).get('name') or 'Unknown'
+            airport_origin_code      = long_json.get('airport', {}).get('origin', {}).get('code', {}).get('iata') or 'Unknown'
+            airport_destination_name = long_json.get('airport', {}).get('destination', {}).get('name') or 'Unknown'
+            airport_destination_code = long_json.get('airport', {}).get('destination', {}).get('code', {}).get('iata') or 'Unknown'
+            real_departure_time      = long_json.get('time', {}).get('real', {}).get('departure') or 'Unknown'
+            estimated_arrival_time   = long_json.get('time', {}).get('estimated', {}).get('arrival') or 'Unknown'
+            trail_data               = long_json.get('trail', [])
+            if len(trail_data) > 0:
+                speed    = trail_data[0].get('spd') or 'Unknown'
+                altitude = trail_data[0].get('alt') or 'Unknown'
+        except AttributeError as e:
+            print(e)
+            pass
+
         # Remove airport from airport names
         airport_origin_name = airport_origin_name.replace(" Airport","")
         airport_destination_name=airport_destination_name.replace(" Airport","")
@@ -292,9 +318,9 @@ def parse_details_json():
         # Use global so we can change these values inside this function, the values are read again in display_flight()
         global flight_labels_text
         flight_labels_text = ["","",""]
-        flight_labels_text[0] = flight_callsign + "-" + flight_number + " - " + airline_name
+        flight_labels_text[0] = flight_number + "-" + flight_callsign + " - " + airline_name
         flight_labels_text[1] = airport_origin_code + "-" + airport_destination_code + " - " + airport_origin_name + "-" + airport_destination_name
-        flight_labels_text[2] = aircraft_code + " - " + aircraft_model
+        flight_labels_text[2] = aircraft_model + " - " + str(speed) + " knots - " + str(altitude) + " feet"
 
         # optional filter example - check things and return false if you want
 
@@ -310,9 +336,9 @@ def parse_details_json():
 
     return True
 
-# 
+#
 # Function to find flights within a bounds box
-# 
+#
 def get_flights():
     matrixportal.url = FLIGHT_SEARCH_URL
     try:
@@ -330,9 +356,9 @@ def get_flights():
     else:
         return False
 
-# 
+#
 # Function to update the clock time/date data
-# 
+#
 def update_clock(*, hours=None, minutes=None, show_colon=False):
     now = time.localtime()  # Get the time values we need
 
@@ -350,15 +376,15 @@ def update_clock(*, hours=None, minutes=None, show_colon=False):
     else:
         first_label = clock_date_label
         second_label = clock_time_label
-   
+
     # Update the text for the time
     clock_time_label.text = "{hours:02d}{colon}{minutes:02d}{colon}{seconds:02d}".format(
         hours=now[3], minutes=now[4], seconds=now[5], colon=colon
     )
-    
+
     # Update the text for the date
     days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" ]
-    months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]    
+    months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     if CLOCK_FULL_DATE:
         clock_date_label.text = "{day:02d}/{month:02d}/{year}".format(
             day = now[2],
@@ -378,19 +404,19 @@ def update_clock(*, hours=None, minutes=None, show_colon=False):
     first_label.x = round(matrixportal.display.width / 2 - time_box_width / 2)
     # Put it 1/4ths down the height of the display
     first_label.y = (matrixportal.display.height // 4) * 1
-     
+
     # Center the label by getting the box width and removing it from the width of the display
     date_box_x, date_box_y, date_box_width, date_box_h = second_label.bounding_box
     second_label.x = round(matrixportal.display.width / 2 - date_box_width / 2)
     # Put it 3/4ths down the height of the display
     second_label.y = (matrixportal.display.height // 4) * 3
-    
+
     # Set as the main display
     matrixportal.display.root_group = clock_group
-  
-# 
+
+#
 # Set some defaults to start and run the main loop
-# 
+#
 flight_id = False           # No flight detected at start up
 last_flight = ''            # Used to keep a record of the last flight detected
 last_flight_detected = None # Timestamp of when the last flight was detected
@@ -398,7 +424,7 @@ last_flight_check = None    # Timestamp of when we last checked for overhead fli
 last_time_sync = None       # Timestamp of when we last synced the clock with the internet
 while True:
     watchdog.feed()
-    
+
     # Sync the time with the internet every hour
     if last_time_sync == None or time.monotonic() > last_time_sync + 3600:
         print("Synchronising time")
@@ -444,8 +470,7 @@ while True:
                 # Record the last flight we found and when
                 last_flight = flight_id
                 last_flight_detected = time.monotonic()
-                
-    # Sleep for 1 second before doing the loop again, feed the watchdog and collect the rubbish
-    time.sleep(1)
+
+    # Sleep for 1 second before doing the loop again
     watchdog.feed()
-    gc.collect()
+    time.sleep(0.5)
