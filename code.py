@@ -10,6 +10,7 @@ import adafruit_requests
 import adafruit_connection_manager
 import adafruit_display_text.label
 from bitmaptools import arrayblit
+from math import floor
 from adafruit_portalbase.network import HttpError
 from adafruit_matrixportal.matrixportal import MatrixPortal
 from adafruit_matrixportal.network import Network
@@ -30,7 +31,7 @@ PLANE_COLOUR        = 0x4B0082 # Purple
 PAUSE_BETWEEN_LABEL_SCROLLING   = 1 # Time in seconds to wait between scrolling one label and the next
 NO_FLIGHT_DISPLAY_CLEAR_DELAY   = 60 # Time after the last flight was found before switching back to clock
 PLANE_SPEED = 0.02 # speed plane animation will move - pause time per pixel shift in seconds
-TEXT_SPEED  = 0.02 # speed text labels will move - pause time per pixel shift in seconds
+TEXT_SPEED  = 0.03 # speed text labels will move - pause time per pixel shift in seconds
 # Clock settings
 CLOCK_BLINK = False    # Blink the cursor between minute/hour/seconds or not
 TIME_COLOUR = 0xEE82EE # Grey
@@ -298,6 +299,7 @@ def parse_details_json():
         airport_origin_code      = 'Unknown'
         airport_destination_name = 'Unknown'
         airport_destination_code = 'Unknown'
+        flight_duration_text     = 'Unknown'
         altitude                 = 0
         speed                    = 0
         estimated_arrival_time   = 0
@@ -309,6 +311,10 @@ def parse_details_json():
             flight_callsign          = long_json.get('identification', {}).get('callsign')  or 'Unknown'
             aircraft_code            = long_json.get('aircraft', {}).get('model', {}).get('code') or 'Unknown'
             aircraft_model           = long_json.get('aircraft', {}).get('model', {}).get('text') or 'Unknown'
+            trail_data               = long_json.get('trail', [])
+            if len(trail_data) > 0:
+                speed    = trail_data[0].get('spd') or 0
+                altitude = trail_data[0].get('alt') or 0
             airline_name             = long_json.get('airline', {}).get('name') or 'Unknown'
             airport_origin_name      = long_json.get('airport', {}).get('origin', {}).get('name') or 'Unknown'
             airport_origin_code      = long_json.get('airport', {}).get('origin', {}).get('code', {}).get('iata') or 'Unknown'
@@ -316,10 +322,6 @@ def parse_details_json():
             airport_destination_code = long_json.get('airport', {}).get('destination', {}).get('code', {}).get('iata') or 'Unknown'
             real_departure_time      = long_json.get('time', {}).get('real', {}).get('departure') or 0
             estimated_arrival_time   = long_json.get('time', {}).get('estimated', {}).get('arrival') or 0
-            trail_data               = long_json.get('trail', [])
-            if len(trail_data) > 0:
-                speed    = trail_data[0].get('spd') or 0
-                altitude = trail_data[0].get('alt') or 0
         except AttributeError as e:
             print(e)
             pass
@@ -346,22 +348,31 @@ def parse_details_json():
         else:
             departure_time_text = 'Unknown'
 
+        # If we have both departure and ETA we can work out how long the flight is
+        if estimated_arrival_time != 0 and real_departure_time != 0:
+            flight_duration = estimated_arrival_time - real_departure_time
+            flight_duration_text = "{hours}hr {minutes}min".format(
+                hours=floor(flight_duration / 3600),
+                minutes=floor((flight_duration % 3600)/60)
+                #35182
+            )
+
         if speed != 0:
-            speed_text = "{speed}kn".format(speed=speed)
+            speed_text = "{speed} knots".format(speed=speed)
         else:
             speed_text = "Unknown"
         if altitude != 0:
-            altitude_text = "{altitude}ft".format(altitude=altitude)
+            altitude_text = "{altitude} feet".format(altitude=altitude)
         else:
             altitude_text = "Unknown"
         # Use global so we can change these values inside this function, the values are read again in display_flight()
         global flight_labels_text
         flight_labels_text = ["","","","",""]
         flight_labels_text[0] = flight_number + "-" + flight_callsign + " - " + airline_name
-        flight_labels_text[1] = aircraft_code + " - " + aircraft_model
+        flight_labels_text[1] = aircraft_code + "-" + aircraft_model
         flight_labels_text[2] = airport_origin_code + "-" + airport_destination_code + " - " + airport_origin_name + "-" + airport_destination_name
-        flight_labels_text[3] = "Speed " + speed_text + " - Altitude " + altitude_text
-        flight_labels_text[4] = "Departure " + departure_time_text + " (UTC) - ETA " + arrival_time_text + " (UTC)"
+        flight_labels_text[3] = speed_text + " - " + altitude_text
+        flight_labels_text[4] = "Dep " + departure_time_text + " - ETA " + arrival_time_text + " - Dur " + flight_duration_text
 
         # optional filter example - check things and return false if you want
 
@@ -491,10 +502,10 @@ while True:
         if flight_id:
             if flight_id == last_flight:
                 print("Same flight found, so keep showing it")
+                clear_flight()
                 display_flight()
             else:
-                print("New flight " + flight_id + " found, clear display")
-                clear_flight()
+                print("New flight " + flight_id + " found")
                 # Retrieve more details about this flight
                 if get_flight_details(flight_id):
                     watchdog.feed()
@@ -503,6 +514,7 @@ while True:
                     if parse_details_json():
                         # If successful show the animation and flight details
                         gc.collect()
+                        clear_flight()
                         plane_animation()
                         display_flight()
                     else:
